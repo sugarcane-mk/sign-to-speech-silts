@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SiLTS</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .progress-bar {
+      height: 8px;
+      background: linear-gradient(to right, #6366f1, #8b5cf6);
+      width: 0%;
+      transition: width 0.4s ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-100 to-purple-200 min-h-screen flex flex-col items-center justify-center relative font-sans">
+
+  <!-- LOGO Top-Left -->
+  <img src="Ssn-Logo.png" alt="Logo" class="absolute top-4 left-4  h-20">
+
+  <h1 class="text-5xl font-bold text-center text-indigo-900 mb-8">🎥 Sign Language to speech</h1>
+
+  <div class="bg-white/70 p-8 shadow-xl rounded-xl w-full max-w-3xl">
+    
+    <!-- Video Preview -->
+    <video id="preview" controls class="w-full rounded-lg shadow border mb-6"></video>
+
+    <!-- Record Section -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-gray-700 mb-2">📹 Record a Gesture</h2>
+      <div class="flex gap-4 flex-wrap">
+        <button onclick="startRecording()" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded shadow">Start Recording</button>
+        <button onclick="stopRecording()" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded shadow">Stop & Process</button>
+      </div>
+    </div>
+
+    <!-- Upload Section -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-gray-700 mb-2">⬆️ Or Upload a Video (MP4)</h2>
+      <div class="flex items-center gap-4">
+        <input type="file" id="videoInput" accept="video/mp4" class="border border-gray-300 p-2 rounded shadow-sm bg-white">
+        <button onclick="uploadVideo()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded shadow">Upload & Process</button>
+      </div>
+    </div>
+
+    <!-- Progress Bar -->
+    <div id="progressContainer" class="w-full bg-gray-200 rounded mb-6 hidden">
+      <div id="progressBar" class="progress-bar rounded"></div>
+    </div>
+
+    <!-- Transcription -->
+    <div class="mb-4">
+      <p id="predictedText" class="text-lg font-semibold text-gray-800">📝 Prediction will appear here...</p>
+    </div>
+
+    <!-- Audio Output -->
+    <audio id="audioOutput" autoplay controls class="w-full mt-2 border rounded shadow"></audio>
+
+    <!-- Error Box -->
+    <div id="errorBox" class="hidden mt-6 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded shadow" role="alert"></div>
+  </div>
+
+  <!-- LOGO Bottom-Right -->
+  <img src="dst-logo1.jpg" alt="DST Logo" class="absolute top-4 right-4 h-20 opacity-70">
+
+  <script>
+    let mediaRecorder;
+    let recordedBlobs = [];
+
+    function showError(message) {
+      const box = document.getElementById("errorBox");
+      box.textContent = message;
+      box.classList.remove("hidden");
+    }
+
+    function clearError() {
+      const box = document.getElementById("errorBox");
+      box.classList.add("hidden");
+      box.textContent = "";
+    }
+
+    function updateProgress(percent) {
+      const container = document.getElementById('progressContainer');
+      const bar = document.getElementById('progressBar');
+      container.classList.remove("hidden");
+      bar.style.width = percent + "%";
+    }
+
+    function resetProgress() {
+      document.getElementById('progressBar').style.width = '0%';
+      document.getElementById('progressContainer').classList.add("hidden");
+    }
+
+    async function startRecording() {
+      clearError();
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        recordedBlobs = [];
+        mediaRecorder = new MediaRecorder(stream);
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            recordedBlobs.push(event.data);
+          }
+        };
+
+        mediaRecorder.start();
+        console.log("Recording started...");
+      } catch (err) {
+        console.error("Media error:", err);
+        showError("⚠️ Could not access camera/microphone. Please allow permissions.");
+      }
+    }
+
+    async function stopRecording() {
+      if (!mediaRecorder) return showError("⚠️ Recording not started.");
+      mediaRecorder.stop();
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(recordedBlobs, { type: 'video/mp4' });
+        const videoURL = URL.createObjectURL(blob);
+        const preview = document.getElementById('preview');
+        preview.srcObject = null;
+        preview.src = videoURL;
+
+        const formData = new FormData();
+        formData.append('video', blob, 'recorded_video.mp4');
+        await sendToBackend(formData);
+      };
+    }
+
+    async function uploadVideo() {
+      clearError();
+      const fileInput = document.getElementById('videoInput');
+      const file = fileInput.files[0];
+      if (!file) return showError("⚠️ Please select a video file.");
+
+      const preview = document.getElementById('preview');
+      preview.srcObject = null;
+      preview.src = URL.createObjectURL(file);
+
+      const formData = new FormData();
+      formData.append('video', file);
+      await sendToBackend(formData);
+    }
+
+    async function sendToBackend(formData) {
+      clearError();
+      updateProgress(10);
+      document.getElementById('predictedText').textContent = "⏳ Uploading and processing...";
+
+      try {
+        const response = await fetch('http://localhost:8000/process', {
+          method: 'POST',
+          body: formData
+        });
+
+        updateProgress(60);
+
+        if (!response.ok) throw new Error(`Server responded with ${response.status}`);
+
+        const result = await response.json();
+        updateProgress(100);
+
+        document.getElementById('predictedText').textContent = "📝 Prediction: " + result.text;
+
+        const audio = document.getElementById('audioOutput');
+        audio.src = 'http://localhost:8000/audio/test.wav';
+        audio.load();
+        audio.play();
+      } catch (error) {
+        console.error("Backend error:", error);
+        showError("❌ Failed to process video. Check backend.");
+        document.getElementById('predictedText').textContent = "📝 Prediction failed.";
+      } finally {
+        setTimeout(() => resetProgress(), 2000);
+      }
+    }
+  </script>
+</body>
+</html>

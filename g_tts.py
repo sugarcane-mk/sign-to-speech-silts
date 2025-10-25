@@ -4,8 +4,9 @@ from pydub import AudioSegment
 import sys
 
 
-text = sys.argv[1]
+text = " ".join(sys.argv[1:])
 print(text)
+
 tts = gTTS(text, lang='ta')
 tts.save("output_tamil.mp3")
 

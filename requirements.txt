@@ -5,3 +5,4 @@ tensorflow
 Ipython
 pydub
 gTTs
+fastapi
